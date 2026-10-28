@@ -679,6 +679,7 @@ mod tests {
             std::env::temp_dir().join(format!("procdump-output-security-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         let victim = root.join("victim");
         let link = root.join("dump");
 
