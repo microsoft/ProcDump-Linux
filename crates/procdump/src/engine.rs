@@ -681,11 +681,33 @@ mod tests {
         fs::create_dir(&root).unwrap();
         let victim = root.join("victim");
         let link = root.join("dump");
-        fs::write(&victim, b"unchanged").unwrap();
-        symlink(&victim, &link).unwrap();
 
-        assert!(open_output_file(&link, true).is_err());
-        assert_eq!(fs::read(&victim).unwrap(), b"unchanged");
+        for target_exists in [false, true] {
+            if target_exists {
+                fs::write(&victim, b"unchanged").unwrap();
+            }
+            symlink(&victim, &link).unwrap();
+
+            for overwrite in [false, true] {
+                let error = open_output_file(&link, overwrite).unwrap_err();
+                if overwrite {
+                    assert!(matches!(
+                        error,
+                        DumpError::Io { source, .. }
+                            if source.raw_os_error() == Some(libc::ELOOP)
+                    ));
+                } else {
+                    assert!(matches!(error, DumpError::AlreadyExists(path) if path == link));
+                }
+                assert_eq!(fs::read_link(&link).unwrap(), victim);
+                if target_exists {
+                    assert_eq!(fs::read(&victim).unwrap(), b"unchanged");
+                } else {
+                    assert!(!victim.exists());
+                }
+            }
+            fs::remove_file(&link).unwrap();
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
