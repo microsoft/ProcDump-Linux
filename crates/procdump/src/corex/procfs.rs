@@ -62,6 +62,11 @@ pub(super) fn apply_coredump_filter(process: &mut ProcessInfo) -> Result<(), Cor
     };
     let executable = process.exe.clone();
     for mapping in &mut process.mappings {
+        // The kernel's emulated vsyscall page cannot be read through /proc/<pid>/mem.
+        if mapping.path == "[vsyscall]" {
+            mapping.should_dump = false;
+            continue;
+        }
         let category = match (mapping.is_file_backed, mapping.is_shared) {
             (false, false) => 0,
             (false, true) => 1,
@@ -239,5 +244,27 @@ mod tests {
         assert!(mapping.is_file_backed);
         assert!(!mapping.is_shared);
         assert_eq!(mapping.path, "/usr/bin/test app");
+    }
+
+    #[test]
+    fn excludes_vsyscall_without_excluding_other_anonymous_mappings() {
+        let mut process = read_process(std::process::id() as i32).unwrap();
+        process.mappings = [
+            "ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0 [vsyscall]",
+            "7ffff7ffb000-7ffff7ffd000 r-xp 00000000 00:00 0 [vdso]",
+            "7ffff7ffa000-7ffff7ffb000 ---p 00000000 00:00 0",
+        ]
+        .into_iter()
+        .map(|line| parse_mapping(line).unwrap())
+        .collect();
+
+        for mask in [0x33, u32::MAX] {
+            process.coredump_filter = mask;
+            apply_coredump_filter(&mut process).unwrap();
+
+            assert!(!process.mappings[0].should_dump);
+            assert!(process.mappings[1].should_dump);
+            assert!(process.mappings[2].should_dump);
+        }
     }
 }
